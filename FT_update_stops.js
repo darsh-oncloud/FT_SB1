@@ -1,9 +1,10 @@
+
 /**
  * @NApiVersion 2.x
  * @NScriptType UserEventScript
  * @NModuleScope SameAccount
  */
-define(['N/record', 'N/log', 'N/search'], function(record, log, search) {
+define(['N/record', 'N/log', 'N/search', 'N/file'], function(record, log, search, file) {
 
     function afterSubmit(context) {
         var newRecord = context.newRecord;
@@ -17,7 +18,7 @@ define(['N/record', 'N/log', 'N/search'], function(record, log, search) {
 
         var related_Sodetails = newRecord.getValue({fieldId: 'custbody_ft_so_details_object'});
         var MG_Status = newRecord.getValue({fieldId: 'custbody_ft_mhpostatus'});
-      
+
 
       log.debug('Values', {
         recId: recId,
@@ -30,7 +31,7 @@ define(['N/record', 'N/log', 'N/search'], function(record, log, search) {
             related_Sodetails = JSON.parse(related_Sodetails)
             var SOs = [];
             for (x = 0; x < related_Sodetails.length; x++) {
-              var soID = get_so_id(related_Sodetails[x].SOInternalID);   
+              var soID = get_so_id(related_Sodetails[x].SOInternalID);
               if (soID.returnid) SOs.push(soID.returnid)
             }
             log.debug('SOs', SOs)
@@ -50,6 +51,9 @@ define(['N/record', 'N/log', 'N/search'], function(record, log, search) {
                 try {
 
                   record.submitFields({type:recType,id:recId,values:{custbody_ft_update_stops: true}})
+
+                  // NEW - Save stops payload history
+                  saveStopsPayloadHistory(recType, recId, newStopDetails);
 
                     log.debug({
                         title: 'Field Updated on Create',
@@ -77,6 +81,9 @@ define(['N/record', 'N/log', 'N/search'], function(record, log, search) {
 
                     record.submitFields({type:recType,id:recId,values:{custbody_ft_update_stops: true}})
 
+                    // NEW - Append changed stops payload
+                    if (newStopDetails) saveStopsPayloadHistory(recType, recId, newStopDetails);
+
                     log.debug({
                         title: 'Field Updated on Edit',
                         details: 'Field custbody_ft_related_stop_details has changed. custbody_ft_update_stops set to true.'
@@ -91,36 +98,69 @@ define(['N/record', 'N/log', 'N/search'], function(record, log, search) {
         }
     }
 
+    // NEW - Create or append stops payload history file
+    function saveStopsPayloadHistory(recType, recId, payload) {
+        if (recType != 'purchaseorder' && recType != 'salesorder') return;
+
+        try {
+            var fieldId = 'custbody_stops_json_payload';
+            var existingId = record.load({type:recType, id:recId}).getValue({fieldId:fieldId});
+            var timestamp = new Date().toISOString();
+            var entry = '// ' + timestamp + '\n' + String(payload) + '\n';
+
+            var f = existingId ? file.load({id:existingId}) : file.create({
+                name: recType + '_' + recId + '_Stops_Payload_History.txt',
+                fileType: file.Type.PLAINTEXT,
+                contents: entry,
+                folder: 2774950
+            });
+
+            if (existingId) f.appendLine({value:'\n' + entry});
+            var fileId = f.save();
+
+            if (String(existingId || '') !== String(fileId)) {
+                var values = {};
+                values[fieldId] = fileId;
+                record.submitFields({type:recType, id:recId, values:values, options:{ignoreMandatoryFields:true}});
+            }
+
+            log.audit('Stops Payload History Saved', {recType:recType, recId:recId, fileId:fileId});
+
+        } catch (e) {
+            log.error('Stops Payload History Error', e.toString());
+        }
+    }
+
   function get_so_id(so_externalid){
     var returnid = '';
-    
-    
+
+
     if (so_externalid) {
       var salesorderSearchObj = search.create({
         type: "salesorder",
         filters:
         [
-          ["mainline","is","T"], 
-          "AND", 
+          ["mainline","is","T"],
+          "AND",
           ["externalid","anyof",so_externalid]
         ],
         columns:
         [
           search.createColumn({name: "internalid", label: "Internal ID"})
-          
+
         ]
       });
       var searchResultCount = salesorderSearchObj.runPaged().count;
       salesorderSearchObj.run().each(function(result){
-        
+
         returnid = result.getValue({
-          name: "internalid", 
+          name: "internalid",
           label: "Internal ID"
         })
 
         return true;
       })
-      
+
     }
     return {returnid:returnid};
   }
