@@ -75,7 +75,8 @@ define(['N/record', 'N/log', 'N/search', 'N/file'], function(record, log, search
           log.debug('newStopDetails', newStopDetails)
 
             // If the values have changed, set 'custbody_ft_update_stops' to true
-            if (oldStopDetails != newStopDetails) {
+            var existingFileId = newRecord.getValue({fieldId:'custbody_stops_json_payload'});
+            if (oldStopDetails != newStopDetails || (newStopDetails && !existingFileId)) {
                 try {
 
                     record.submitFields({type:recType,id:recId,values:{custbody_ft_update_stops: true}})
